@@ -1,0 +1,28 @@
+[package]
+name = "txttattler"
+version = "1.0.0"
+edition = "2021"
+description = "TxtTattler – a fun, blazing-fast CLI text-to-speech app"
+license = "MIT"
+
+[[bin]]
+name = "txttattler"
+path = "src/main.rs"
+
+[dependencies]
+async-openai = "0.28"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+rodio = { version = "0.19", features = ["mp3"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+indicatif = "0.17"
+console = "0.15"
+sha2 = "0.10"
+hex = "0.4"
+dirs = "5"
+dotenvy = "0.15"
+async-trait = "0.1"
