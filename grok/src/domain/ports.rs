@@ -99,11 +99,15 @@ pub trait AudioPlayer: Send + Sync {
 #[async_trait]
 pub trait TextToSpeechService {
     /// The big one: take a document, turn it into beautiful spoken word.
+    /// Cache-related flags control the new default MP3 caching behavior.
     async fn tattle(
         &self,
         document: ProcessedDocument,
         options: TtsOptions,
         output_path: Option<std::path::PathBuf>,
         play: bool,
+        no_cache: bool,
+        refresh: bool,
+        cache_dir: Option<std::path::PathBuf>,
     ) -> Result<TtsResult>;
 }

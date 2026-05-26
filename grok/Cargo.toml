@@ -35,6 +35,9 @@ dirs = "5.0"
 # .env file support (load OPENAI_API_KEY etc from .env in CWD)
 dotenvy = "0.15"
 
+# Content hashing for MP3 cache keys (content + voice + model + speed + processing version)
+sha2 = "0.10"
+
 # Error handling
 anyhow = "1.0"
 

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 #[command(name = "txttattler")]
 #[command(bin_name = "txttattler")]
 #[command(version, about, long_about = None)]
-#[command(after_help = "EXAMPLES:\n  txttattler meeting-notes.txt\n  txttattler --voice fable --speed 0.9 novel-chapter-7.txt\n  txttattler report.pdf --output meeting.mp3 --no-play\n  txttattler --list-voices\n\nENVIRONMENT:\n  OPENAI_API_KEY          Your OpenAI key (required unless using --azure)\n  AZURE_OPENAI_API_KEY    Azure key when using --azure\n  AZURE_OPENAI_ENDPOINT   Your Azure endpoint (https://....openai.azure.com/)\n\nThe tattler is always listening. Use responsibly.")]
+#[command(after_help = "EXAMPLES:\n  txttattler meeting-notes.txt\n  txttattler --voice fable --speed 0.9 novel-chapter-7.txt\n  txttattler report.pdf --output meeting.mp3 --no-play\n  txttattler long-doc.txt --refresh          # force new TTS + update cache\n  txttattler long-doc.txt --no-cache         # one-off, don't touch cache\n  txttattler --list-voices\n\nENVIRONMENT:\n  OPENAI_API_KEY          Your OpenAI key (required unless using --azure)\n  AZURE_OPENAI_API_KEY    Azure key when using --azure\n  AZURE_OPENAI_ENDPOINT   Your Azure endpoint (https://....openai.azure.com/)\n\nThe tattler is always listening. Use responsibly.")]
 pub struct Cli {
     /// The file to read aloud (.txt supported today, .docx/.pdf coming soon)
     #[arg(value_name = "FILE", required_unless_present = "list_voices")]
@@ -44,6 +44,18 @@ pub struct Cli {
     /// Generate the file but do not play it through speakers
     #[arg(long)]
     pub no_play: bool,
+
+    /// Disable the MP3 cache entirely for this run (always call OpenAI)
+    #[arg(long)]
+    pub no_cache: bool,
+
+    /// Force regeneration even if a valid cached MP3 exists (updates the cache)
+    #[arg(long)]
+    pub refresh: bool,
+
+    /// Override the default platform cache directory for MP3 files
+    #[arg(long, value_name = "PATH")]
+    pub cache_dir: Option<PathBuf>,
 
     /// Force Azure OpenAI endpoint (uses AZURE_* environment variables or config)
     #[arg(long)]

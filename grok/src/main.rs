@@ -112,9 +112,17 @@ async fn main() -> Result<()> {
     // Decide playback behavior
     let should_play = !cli.no_play;
 
-    // Run the main gossip delivery
+    // Run the main gossip delivery (with shiny new MP3 caching)
     let result = orchestrator
-        .tattle(document, resolved.tts_options, cli.output.clone(), should_play)
+        .tattle(
+            document,
+            resolved.tts_options,
+            cli.output.clone(),
+            should_play,
+            cli.no_cache,
+            cli.refresh,
+            cli.cache_dir.clone(),
+        )
         .await?;
 
     print_success_footer(&result);

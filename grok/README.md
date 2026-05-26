@@ -89,6 +89,29 @@ Supported variables:
 
 The file is loaded **very early** — before CLI parsing or any other config.
 
+### MP3 Caching (the tattler remembers)
+
+By default, TxtTattler saves every synthesized result to a content-addressed cache:
+
+- Linux: `~/.cache/txttattler/`
+- macOS: `~/Library/Caches/txttattler/`
+- Windows: `%LOCALAPPDATA%\txttattler\`
+
+The cache key includes the **exact cleaned text**, voice, model, speed, and an internal processing version. This means:
+
+- Re-running the exact same file with the same settings is **instant** and makes **zero** OpenAI calls.
+- Changing even one word, the voice, or the speed automatically generates a new cache entry.
+
+Useful flags:
+
+```bash
+txttattler long-doc.txt --refresh          # Regenerate and replace the cached version
+txttattler long-doc.txt --no-cache         # Skip cache completely (one-off run)
+txttattler long-doc.txt --cache-dir ./my-cache   # Use a custom location
+```
+
+When a cache hit occurs you will see a friendly `💾 Cache hit!` message.
+
 ### TOML configuration file
 
 TxtTattler also looks for `~/.config/txttattler/config.toml` (or `%APPDATA%\txttattler\config.toml` on Windows).

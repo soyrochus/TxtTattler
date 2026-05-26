@@ -6,6 +6,7 @@ use crate::domain::entities::{ProcessedDocument, TtsOptions, TtsResult};
 use crate::domain::ports::{
     AudioPlayer, FileReaderRegistry, TextToSpeechService, TtsProvider,
 };
+use crate::infrastructure::cache::Mp3Cache;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -67,6 +68,9 @@ impl TextToSpeechService for TextToSpeechOrchestrator {
         options: TtsOptions,
         output_path: Option<PathBuf>,
         play_audio: bool,
+        no_cache: bool,
+        refresh: bool,
+        cache_dir_override: Option<PathBuf>,
     ) -> Result<TtsResult> {
         use console::style;
 
@@ -83,6 +87,97 @@ impl TextToSpeechService for TextToSpeechOrchestrator {
             style(options.voice).green(),
             style(options.model).green()
         );
+
+        // === NEW: MP3 Caching logic (Default MP3 Caching & Replay) ===
+        let cache = if no_cache {
+            None
+        } else {
+            Some(Mp3Cache::new(cache_dir_override.clone())?)
+        };
+
+        let cache_key = if let Some(ref c) = cache {
+            let key = c.cache_key(
+                &document.plain_text,
+                options.voice.as_str(),
+                options.model.as_str(),
+                options.speed,
+            );
+            Some(key)
+        } else {
+            None
+        };
+
+        // Check for a happy cache hit (unless user said --refresh or --no-cache)
+        if let (Some(ref c), Some(ref key)) = (&cache, &cache_key) {
+            if !refresh {
+                if let Some(cached_path) = c.get(key) {
+                    println!(
+                        "   {} {}",
+                        style("💾").green().bold(),
+                        style("Cache hit! Reusing previous gossip (no OpenAI call)").green()
+                    );
+                    if let Some(v) = &cache_dir_override {
+                        tracing::debug!("Using custom cache dir: {}", v.display());
+                    }
+
+                    // Handle --output by copying the cached file (fast path)
+                    let final_output_path = if let Some(ref out) = output_path {
+                        if let Some(parent) = out.parent() {
+                            std::fs::create_dir_all(parent).ok();
+                        }
+                        std::fs::copy(&cached_path, out)
+                            .with_context(|| format!("Failed to copy cached MP3 to {}", out.display()))?;
+                        println!(
+                            "{} Copied cached gossip to {}",
+                            style("💾").green(),
+                            style(out.display()).bold()
+                        );
+                        Some(out.clone())
+                    } else {
+                        None
+                    };
+
+                    // Playback from the cached file when possible (more efficient)
+                    if play_audio {
+                        println!(
+                            "{} {}",
+                            style("🔊").bold(),
+                            style("Playing from cache...").dim()
+                        );
+                        // Fall back to loading bytes if direct file play isn't supported by the player trait
+                        let bytes = std::fs::read(&cached_path)?;
+                        self.audio_player.play(&bytes).context("Cached playback failed")?;
+                        println!("{}", style("✓ Finished playing cached gossip.").green());
+                    }
+
+                    return Ok(TtsResult {
+                        total_chunks: 0, // we didn't synthesize anything
+                        total_chars: document.char_count,
+                        voice_used: options.voice,
+                        model_used: options.model,
+                        output_path: final_output_path,
+                        duration_hint_secs: None,
+                    });
+                }
+            } else {
+                // --refresh: nuke the old entry so we always regenerate
+                c.remove(key).ok();
+                println!(
+                    "   {} {}",
+                    style("🔄").yellow(),
+                    style("Refresh requested — regenerating and updating cache").yellow()
+                );
+            }
+        }
+
+        // === Normal synthesis path (cache miss or forced) ===
+        if cache.is_some() {
+            println!(
+                "   {} {}",
+                style("✨").dim(),
+                style("Cache miss — calling the cloud gossips...").dim()
+            );
+        }
 
         let chunks = document.chunk(OPENAI_MAX_CHARS_PER_CHUNK);
         let total_chunks = chunks.len();
@@ -126,27 +221,42 @@ impl TextToSpeechService for TextToSpeechOrchestrator {
 
         pb.finish_with_message("synthesis complete");
 
-        // Save combined output if requested
-        let final_output_path = if let Some(ref out) = output_path {
-            // Simple but effective: concatenate the MP3 segments.
-            // OpenAI TTS segments from the same voice/model concatenate reasonably well.
-            let mut combined = Vec::new();
-            for seg in &audio_segments {
-                combined.extend_from_slice(seg);
-            }
+        // Combine once for caching + --output
+        let mut combined_audio: Vec<u8> = Vec::new();
+        for seg in &audio_segments {
+            combined_audio.extend_from_slice(seg);
+        }
 
-            // Ensure parent dir exists
+        // === Write to cache if enabled ===
+        if let (Some(ref c), Some(ref key)) = (&cache, &cache_key) {
+            match c.put(key, &combined_audio) {
+                Ok(cached_path) => {
+                    println!(
+                        "   {} Cached gossip to {}",
+                        style("💾").green(),
+                        style(cached_path.display()).dim()
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to write MP3 to cache: {}", e);
+                }
+            }
+        }
+
+        // Save combined output if requested (--output can also benefit from cache copy above)
+        let final_output_path = if let Some(ref out) = output_path {
+            // If we didn't already handle it via cache hit path
             if let Some(parent) = out.parent() {
                 std::fs::create_dir_all(parent)?;
             }
 
-            std::fs::write(out, &combined)
+            std::fs::write(out, &combined_audio)
                 .with_context(|| format!("Failed to write output MP3 to {}", out.display()))?;
 
             println!(
                 "{} Saved {} bytes of gossip to {}",
                 style("💾").green(),
-                style(combined.len()).yellow(),
+                style(combined_audio.len()).yellow(),
                 style(out.display()).bold()
             );
             Some(out.clone())
@@ -162,7 +272,6 @@ impl TextToSpeechService for TextToSpeechOrchestrator {
                 style("Now playing through your speakers... (Ctrl-C to stop the tattler)").dim()
             );
 
-            // Use the chunked player for memory efficiency
             self.audio_player
                 .play_chunks(&audio_segments)
                 .context("Audio playback failed")?;
@@ -178,7 +287,7 @@ impl TextToSpeechService for TextToSpeechOrchestrator {
             voice_used: options.voice,
             model_used: options.model,
             output_path: final_output_path,
-            duration_hint_secs: None, // could estimate from bytes later
+            duration_hint_secs: None,
         })
     }
 }
