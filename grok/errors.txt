@@ -1,0 +1,21 @@
+grok on  main [?] is 📦 v0.1.0 via 🦀 v1.95.0 
+❯ cargo run -- ../sample_narrative_tts_demo.txt 
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/txttattler ../sample_narrative_tts_demo.txt`
+
+╔══════════════════════════════════════════════════════════════╗
+║ TXT TATTLER — Your documents have never sounded so dramatic. ║
+╚══════════════════════════════════════════════════════════════╝
+
+
+🗣️ Tattling sample_narrative_tts_demo.txt ...
+   2082 chars  •  355 words  •  voice: alloy  •  model: tts-1
+Error: Failed while synthesizing chunk #1
+
+Caused by:
+    0: TTS synthesis failed on chunk #0
+    1: OpenAI TTS request failed — the cloud gossips refused to speak
+    2: invalid_request_error: You didn't provide an API key. You need to provide your API key in an Authorization header using Bearer auth (i.e. Authorization: Bearer YOUR_KEY), or as the password field (with blank username) if you're accessing the API from your browser and are prompted for a username and password. You can obtain an API key from https://platform.openai.com/account/api-keys.
+
+
+You need to implement reading .env from  cwd  if this files is present. 

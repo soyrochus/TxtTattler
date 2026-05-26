@@ -1,0 +1,35 @@
+[package]
+name = "txttattler"
+version = "1.0.0"
+edition = "2024"
+authors = ["TxtTattler Contributors"]
+description = "A fun, fast command-line text-to-speech tattler powered by OpenAI TTS."
+license = "MIT"
+repository = "https://example.com/txttattler"
+keywords = ["tts", "openai", "cli", "audio", "rust"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+[[bin]]
+name = "txttattler"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+async-openai = { version = "0.40", features = ["audio"] }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive", "color", "wrap_help"] }
+console = "0.15"
+dirs = "5"
+dotenvy = "0.15"
+encoding_rs = "0.8"
+indicatif = "0.17"
+rodio = "0.17"
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"
