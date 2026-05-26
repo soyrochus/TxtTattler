@@ -1,0 +1,17 @@
+Demo Phonetic Text for Text-to-Voice
+
+This short passage is designed to exercise pronunciation, pacing, numbers, punctuation, and common sound contrasts. It is not a formal benchmark corpus, but it is useful for comparing voices.
+
+Please read clearly: Pat packed a paper bag, but Beth brought a better box. Three thin thieves thought they saw thick thunderclouds over the theatre. Very vivid voices vibrated above the valley, while five small ships shifted softly through shallow water.
+
+Now try mixed rhythm. The quick brown fox jumps over the lazy dog. A quiet queen asked a curious question. Six slippery snakes slid silently across smooth stones. George judged the giant jar, then gently joked with Jenny about orange jam.
+
+Here are short sentences with punctuation. Wait. Listen. Continue. Is this working? Yes, it is working. But does it sound natural, or does it sound mechanical? That difference matters.
+
+Here are numbers and dates. The meeting starts at 9:15 in the morning. The invoice total is 1,247 euros and 80 cents. Version 2.3.1 was released on 24 May 2026. The temperature changed from 18 degrees to 31 degrees in less than four hours.
+
+Here are abbreviations and technical words. The API returned an HTTP 404 error. The CPU usage increased, but the GPU remained idle. The file was exported as PDF, then converted to plain text, then sent to the speech model.
+
+Now try contrast and emphasis. I said the blue file, not the green file. She wanted a short summary, not a complete report. He can record the message today, or he can rewrite it tomorrow. The choice is simple, but the consequences are not.
+
+Finally, read this paragraph with a calmer voice. A good synthetic voice should not only pronounce words correctly. It should also carry attention across a sentence, pause at the right places, and avoid turning every phrase into the same melody. If the listener forgets that a machine is reading, even for a moment, the voice is doing its job well.
