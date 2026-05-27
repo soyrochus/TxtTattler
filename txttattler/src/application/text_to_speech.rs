@@ -128,9 +128,9 @@ impl TextToSpeechService {
         }
 
         if config.play_audio {
-            self.reporter
-                .status("Playback started. The tattler has opinions.");
-            self.audio_player.play_mp3(audio.clone())?;
+            self.audio_player
+                .play_mp3(audio.clone(), self.reporter.as_ref())
+                .context("Failed to play generated audio.")?;
         }
 
         let outcome = SynthesisOutcome {
@@ -444,7 +444,7 @@ mod tests {
         config::{OpenAiRuntimeConfig, ProviderConfig, ResolvedConfig},
         domain::{
             entities::{SpeechModelName, TtsRequest, VoiceName},
-            ports::{AudioPlayer, DocumentReader, TextProcessor, TtsProvider},
+            ports::{AudioPlayer, DocumentReader, Reporter, TextProcessor, TtsProvider},
         },
         utils::SilentReporter,
     };
@@ -489,7 +489,7 @@ mod tests {
     }
 
     impl AudioPlayer for RecordingAudioPlayer {
-        fn play_mp3(&self, _audio: Vec<u8>) -> Result<()> {
+        fn play_mp3(&self, _audio: Vec<u8>, _reporter: &dyn Reporter) -> Result<()> {
             *self.plays.lock().unwrap() += 1;
             Ok(())
         }
@@ -518,12 +518,20 @@ mod tests {
     }
 
     fn service(text: &str, calls: Arc<AtomicUsize>) -> TextToSpeechService {
+        service_with_player(text, calls, Arc::new(RecordingAudioPlayer::default()))
+    }
+
+    fn service_with_player(
+        text: &str,
+        calls: Arc<AtomicUsize>,
+        audio_player: Arc<RecordingAudioPlayer>,
+    ) -> TextToSpeechService {
         TextToSpeechService::new(
             Arc::new(StaticReader {
                 text: text.to_string(),
             }),
             Arc::new(CountingTtsProvider { calls }),
-            Arc::new(RecordingAudioPlayer::default()),
+            audio_player,
             vec![
                 Arc::new(CollapseWhitespaceProcessor),
                 Arc::new(ReduceBlankLinesProcessor),
@@ -714,5 +722,19 @@ mod tests {
         assert!(!outcome.playback);
         assert_eq!(outcome.chunks, 1);
         assert_eq!(outcome.character_count, "hello world".chars().count());
+    }
+
+    #[tokio::test]
+    async fn no_play_suppresses_audio_player() {
+        let tempdir = TempDir::new().unwrap();
+        let config = test_config(&tempdir);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let audio_player = Arc::new(RecordingAudioPlayer::default());
+        let service = service_with_player("hello world", calls, audio_player.clone());
+
+        let outcome = service.run(&config).await.unwrap();
+
+        assert!(!outcome.playback);
+        assert_eq!(*audio_player.plays.lock().unwrap(), 0);
     }
 }

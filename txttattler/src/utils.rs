@@ -4,15 +4,17 @@ use std::{
     path::Path,
     process,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::{Context, Result};
-use console::style;
+use console::{Term, style};
 use indicatif::{ProgressBar, ProgressStyle};
 use tracing_subscriber::EnvFilter;
 
-use crate::domain::ports::{ProgressHandle, Reporter};
+use crate::domain::ports::{
+    PlaybackProgressHandle, ProgressHandle, Reporter, clamp_playback_elapsed, format_playback_time,
+};
 
 pub fn init_tracing(verbose: bool) {
     let filter = if verbose { "debug" } else { "info" };
@@ -92,6 +94,10 @@ impl Reporter for SilentReporter {
     fn progress(&self, _message: &str, _len: u64) -> Box<dyn ProgressHandle> {
         Box::new(SilentProgressHandle)
     }
+
+    fn playback(&self, _total: Option<Duration>) -> Box<dyn PlaybackProgressHandle> {
+        Box::new(SilentPlaybackProgressHandle)
+    }
 }
 
 #[derive(Clone, Default)]
@@ -105,10 +111,21 @@ impl ProgressHandle for SilentProgressHandle {
     fn finish_with_message(&self, _message: &str) {}
 }
 
+#[derive(Clone, Default)]
+struct SilentPlaybackProgressHandle;
+
+impl PlaybackProgressHandle for SilentPlaybackProgressHandle {
+    fn tick(&self, _elapsed: Duration) {}
+
+    fn finish(&self) {}
+}
+
 #[cfg(test)]
 mod tests {
-    use super::atomic_write;
+    use super::{StaticPlaybackProgressHandle, atomic_write};
+    use crate::domain::ports::PlaybackProgressHandle;
     use std::fs;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -120,6 +137,13 @@ mod tests {
         atomic_write(&path, b"new").unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), b"new");
+    }
+
+    #[test]
+    fn static_playback_progress_accepts_unknown_duration() {
+        let handle = StaticPlaybackProgressHandle { total: None };
+        handle.tick(Duration::from_secs(3));
+        handle.finish();
     }
 }
 
@@ -157,6 +181,44 @@ impl Reporter for ConsoleReporter {
             inner: Arc::new(progress),
         })
     }
+
+    fn playback(&self, total: Option<Duration>) -> Box<dyn PlaybackProgressHandle> {
+        if let Some(total) = total
+            && Term::stdout().is_term()
+        {
+            let total_ms = duration_millis_u64(total);
+            let progress = ProgressBar::new(total_ms);
+            let style = ProgressStyle::with_template(
+                "{spinner:.cyan} {msg} [{bar:30.green/blue}] {percent:>3}%",
+            )
+            .expect("playback progress template is valid")
+            .progress_chars("=>-");
+            progress.set_style(style);
+            progress.set_message(format!("Playing 00:00 / {}", format_playback_time(total)));
+            return Box::new(IndicatifPlaybackProgressHandle {
+                inner: Arc::new(progress),
+                total,
+            });
+        }
+
+        match total {
+            Some(total) => println!(
+                "{} {}",
+                style("▶").cyan(),
+                style(format!(
+                    "Playback started ({}).",
+                    format_playback_time(total)
+                ))
+                .bold()
+            ),
+            None => println!(
+                "{} {}",
+                style("▶").cyan(),
+                style("Playback started. Duration unknown.").bold()
+            ),
+        }
+        Box::new(StaticPlaybackProgressHandle { total })
+    }
 }
 
 struct IndicatifProgressHandle {
@@ -175,4 +237,61 @@ impl ProgressHandle for IndicatifProgressHandle {
     fn finish_with_message(&self, message: &str) {
         self.inner.finish_with_message(message.to_string());
     }
+}
+
+struct IndicatifPlaybackProgressHandle {
+    inner: Arc<ProgressBar>,
+    total: Duration,
+}
+
+impl PlaybackProgressHandle for IndicatifPlaybackProgressHandle {
+    fn tick(&self, elapsed: Duration) {
+        let elapsed = clamp_playback_elapsed(elapsed, self.total);
+        self.inner.set_position(duration_millis_u64(elapsed));
+        self.inner.set_message(format!(
+            "Playing {} / {}",
+            format_playback_time(elapsed),
+            format_playback_time(self.total)
+        ));
+    }
+
+    fn finish(&self) {
+        self.inner.set_position(duration_millis_u64(self.total));
+        self.inner.finish_with_message(format!(
+            "Playback finished ({})",
+            format_playback_time(self.total)
+        ));
+    }
+}
+
+struct StaticPlaybackProgressHandle {
+    total: Option<Duration>,
+}
+
+impl PlaybackProgressHandle for StaticPlaybackProgressHandle {
+    fn tick(&self, _elapsed: Duration) {}
+
+    fn finish(&self) {
+        match self.total {
+            Some(total) => println!(
+                "{} {}",
+                style("✓").green(),
+                style(format!(
+                    "Playback finished ({}).",
+                    format_playback_time(total)
+                ))
+                .green()
+                .bold()
+            ),
+            None => println!(
+                "{} {}",
+                style("✓").green(),
+                style("Playback finished.").green().bold()
+            ),
+        }
+    }
+}
+
+fn duration_millis_u64(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
