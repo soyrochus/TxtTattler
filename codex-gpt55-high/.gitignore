@@ -1,0 +1,4 @@
+/target
+/.env
+*.mp3
+*.wav
