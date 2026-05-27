@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target
+
+# Environment & secrets — the tattler keeps quiet about these
+.env
+.env.*
+!.env.example
+
+# Generated audio scratch
+*.mp3
+
+# Editor noise
+*.swp
+.DS_Store

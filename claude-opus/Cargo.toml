@@ -1,0 +1,47 @@
+[package]
+name = "claude-opus"
+version = "1.0.0"
+edition = "2024"
+description = "TxtTattler – a fun, blazing-fast CLI that reads your files aloud with OpenAI TTS"
+license = "MIT"
+authors = ["TxtTattler contributors"]
+readme = "README.md"
+repository = "https://github.com/example/txttattler"
+keywords = ["tts", "text-to-speech", "openai", "cli", "audio"]
+categories = ["command-line-utilities", "multimedia::audio"]
+
+# The little gossip answers to "txttattler", no matter what the crate is called.
+[lib]
+name = "txttattler"
+path = "src/lib.rs"
+
+[[bin]]
+name = "txttattler"
+path = "src/main.rs"
+
+[dependencies]
+async-openai = "0.28"
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+rodio = { version = "0.19", features = ["mp3"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+indicatif = "0.17"
+console = "0.15"
+sha2 = "0.10"
+hex = "0.4"
+dirs = "5"
+dotenvy = "0.15"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
