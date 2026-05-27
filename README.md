@@ -34,7 +34,7 @@ The resulting analysis documents are:
 
 ---
 
-## TxtTattler
+## The application: TxtTattler
 
 > Your documents have never sounded so dramatic.
 
