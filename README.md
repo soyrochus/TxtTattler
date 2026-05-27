@@ -125,6 +125,30 @@ Two follow-up addenda extend the study to six implementations:
 
 ---
 
+## Consolidation
+
+After completing the six-way analysis, the **GitHub Copilot (Auto)** implementation was chosen as the baseline for the canonical app. It ranked first overall: the strongest CLI contract, the only implementation with a full reporter port and composable named processor chain, the only one with correct UTF-16 support and exact Azure auto-detection, and the broadest test suite.
+
+The baseline was copied to the `txttattler/` directory at the root of this repository, which is now the single canonical version of TxtTattler. It is not another study candidate — it is the production app.
+
+That copy was then subjected to an OpenSpec change named **`consolidate-default-implementation`**, driven by [`specs/spec-001-initial-consolidation.md`](specs/spec-001-initial-consolidation.md). The change cherry-picked the best features and fixes from every other implementation:
+
+- **From Grok** — atomic MP3 cache writes (temp-file-then-rename), cache-hit output copy, and richer `--list-voices` descriptions.
+- **From Codex (GPT-4.4 Medium)** — `.env` fallback to `CARGO_MANIFEST_DIR` for development workflows, and the cache-reuse integration test pattern (counting fake TTS provider).
+- **From Codex (GPT-5.5 High)** — atomic `--output` writes (same helper as cache), structured `SynthesisOutcome` return type, and full `Cargo.toml` metadata hygiene.
+- **From Claude Opus** — thin `main.rs` (6 lines), `SilentReporter`/`SilentProgressHandle` for test isolation, and entity `Display`/`FromStr`/`const ALL` discipline.
+
+Required fixes applied on top of the baseline:
+
+- `--speed` changed from `f32` to `Option<f32>` so config-file speed is not silently overridden by the implicit CLI default.
+- `FileReaderRegistry` abstracted behind a `DocumentReader` domain port so the use-case imports no infrastructure types.
+- UTF-16 BOM tests added.
+- Cache key sensitivity tests and config precedence tests added.
+
+The consolidated app in `txttattler/` compiles cleanly, all tests pass, and it retains every strength of the original Copilot baseline while incorporating the best ideas from the other five implementations.
+
+---
+
 ## The application: TxtTattler
 
 > Your documents have never sounded so dramatic.
@@ -134,6 +158,8 @@ A fast, cross-platform, pure-Rust command-line text-to-speech tool that reads yo
 ```sh
 txttattler chapter-7.txt --voice fable --speed 0.9
 ```
+
+![console](./images/txttattler-help.png)
 
 ### Features
 
@@ -147,7 +173,7 @@ The spec defines a feature set that all implementations target. Coverage and qua
 - `--output` to save the generated MP3
 - TOML config file + environment variable overrides with a defined precedence order
 - MP3 caching keyed on content, voice, model, and speed
-- Progress feedback and `-V` verbose mode
+- Progress feedback and `--verbose` mode
 
 ### Building
 
@@ -196,7 +222,7 @@ Options:
       --azure             Force Azure OpenAI
       --config <PATH>     Custom TOML config
       --list-voices       Show all voices with descriptions
-  -V, --verbose           More logging (repeat for trace)
+      --verbose           More logging
 ```
 
 ### Configuration
@@ -270,7 +296,7 @@ The use-case depends only on traits. Swapping the TTS backend or adding a new fi
 ### Development
 
 ```bash
-cargo run -- myfile.txt -V
+cargo run -- myfile.txt --verbose
 cargo test
 cargo build --release
 ```
