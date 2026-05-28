@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     config::ResolvedConfig,
     domain::{
-        entities::{SynthesisOutcome, TtsRequest},
+        entities::{SpeechModelName, SynthesisOutcome, TtsRequest},
         ports::{
             AudioPlayer, DocumentReader, ProgressHandle, Reporter, TextProcessor, TtsProvider,
         },
@@ -68,6 +68,7 @@ impl TextToSpeechService {
             config.model.as_str(),
             config.speed,
             &pipeline_version,
+            config.instructions.as_deref(),
         );
         let cache_path = config.cache_dir.join(format!("{cache_key}.mp3"));
         let chunks = chunk_text(&processed, MAX_CHARS_PER_REQUEST);
@@ -77,6 +78,7 @@ impl TextToSpeechService {
             raw_text.chars().count(),
             processed.chars().count()
         ));
+        self.emit_compatibility_warnings(config);
 
         let mut from_cache = false;
         self.reporter.status("Checking cache ...");
@@ -143,6 +145,7 @@ impl TextToSpeechService {
             voice: config.voice,
             model: config.model,
             speed: config.speed,
+            instructions: config.instructions.clone(),
             playback: config.play_audio,
         };
 
@@ -150,8 +153,35 @@ impl TextToSpeechService {
             "Done. Voice={}, model={}, speed={:.2}x.",
             config.voice, config.model, config.speed
         ));
+        if let Some(instructions) = &config.instructions {
+            self.reporter.status(&format!(
+                "Instructions: {}",
+                format_instructions_for_summary(instructions, config.verbose)
+            ));
+        }
 
         Ok(outcome)
+    }
+
+    fn emit_compatibility_warnings(&self, config: &ResolvedConfig) {
+        if config.instructions.is_some()
+            && matches!(
+                config.model,
+                SpeechModelName::Tts1 | SpeechModelName::Tts1Hd
+            )
+        {
+            self.reporter.warning(
+                "--instructions is only supported by gpt-4o-mini-tts; tts-1 and tts-1-hd may ignore it.",
+            );
+        }
+
+        if config.model == SpeechModelName::Gpt4oMiniTts
+            && (config.speed - 1.0).abs() > f32::EPSILON
+        {
+            self.reporter.warning(
+                "--speed is not reliably supported by gpt-4o-mini-tts; the requested speed will still be sent.",
+            );
+        }
     }
 
     async fn generate_chunks(
@@ -182,6 +212,7 @@ impl TextToSpeechService {
                 voice: config.voice,
                 model: config.model,
                 speed: config.speed,
+                instructions: config.instructions.clone(),
             };
             output.push(self.tts_provider.synthesize(&request).await?);
             progress.inc(1);
@@ -232,6 +263,7 @@ pub fn build_cache_key(
     model: &str,
     speed: f32,
     version: &str,
+    instructions: Option<&str>,
 ) -> String {
     let mut hasher = Sha256::new();
     hasher.update(raw_text.as_bytes());
@@ -243,7 +275,29 @@ pub fn build_cache_key(
     hasher.update(format!("{speed:.3}").as_bytes());
     hasher.update([0]);
     hasher.update(version.as_bytes());
+    hasher.update([0]);
+    if let Some(instructions) = instructions {
+        hasher.update([1]);
+        hasher.update(instructions.as_bytes());
+    }
     format!("{:x}", hasher.finalize())
+}
+
+pub fn format_instructions_for_summary(instructions: &str, verbose: bool) -> String {
+    if verbose {
+        return instructions.to_string();
+    }
+
+    const MAX_DISPLAY_CHARS: usize = 80;
+    if instructions.chars().count() <= MAX_DISPLAY_CHARS {
+        return instructions.to_string();
+    }
+
+    let truncated = instructions
+        .chars()
+        .take(MAX_DISPLAY_CHARS - 1)
+        .collect::<String>();
+    format!("{truncated}…")
 }
 
 pub fn concat_mp3_segments(segments: &[Vec<u8>]) -> Vec<u8> {
@@ -438,13 +492,16 @@ impl TextProcessor for StripMarkdownProcessor {
 mod tests {
     use super::{
         CollapseWhitespaceProcessor, ReduceBlankLinesProcessor, StripMarkdownProcessor,
-        TextToSpeechService, build_cache_key, chunk_text, pipeline_version,
+        TextToSpeechService, build_cache_key, chunk_text, format_instructions_for_summary,
+        pipeline_version,
     };
     use crate::{
         config::{OpenAiRuntimeConfig, ProviderConfig, ResolvedConfig},
         domain::{
             entities::{SpeechModelName, TtsRequest, VoiceName},
-            ports::{AudioPlayer, DocumentReader, Reporter, TextProcessor, TtsProvider},
+            ports::{
+                AudioPlayer, DocumentReader, ProgressHandle, Reporter, TextProcessor, TtsProvider,
+            },
         },
         utils::SilentReporter,
     };
@@ -473,11 +530,15 @@ mod tests {
 
     struct CountingTtsProvider {
         calls: Arc<AtomicUsize>,
+        requests: Option<Arc<Mutex<Vec<TtsRequest>>>>,
     }
 
     #[async_trait]
     impl TtsProvider for CountingTtsProvider {
-        async fn synthesize(&self, _request: &TtsRequest) -> Result<Vec<u8>> {
+        async fn synthesize(&self, request: &TtsRequest) -> Result<Vec<u8>> {
+            if let Some(requests) = &self.requests {
+                requests.lock().unwrap().push(request.clone());
+            }
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(format!("audio-{call}").into_bytes())
         }
@@ -495,12 +556,64 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingReporter {
+        warnings: Mutex<Vec<String>>,
+        statuses: Mutex<Vec<String>>,
+    }
+
+    impl Reporter for RecordingReporter {
+        fn status(&self, message: &str) {
+            self.statuses.lock().unwrap().push(message.to_string());
+        }
+
+        fn detail(&self, _message: &str) {}
+
+        fn warning(&self, message: &str) {
+            self.warnings.lock().unwrap().push(message.to_string());
+        }
+
+        fn success(&self, message: &str) {
+            self.statuses.lock().unwrap().push(message.to_string());
+        }
+
+        fn progress(&self, _message: &str, _len: u64) -> Box<dyn ProgressHandle> {
+            Box::new(NoopProgressHandle)
+        }
+
+        fn playback(
+            &self,
+            _total: Option<std::time::Duration>,
+        ) -> Box<dyn crate::domain::ports::PlaybackProgressHandle> {
+            Box::new(NoopPlaybackProgressHandle)
+        }
+    }
+
+    struct NoopProgressHandle;
+
+    impl ProgressHandle for NoopProgressHandle {
+        fn inc(&self, _delta: u64) {}
+
+        fn set_message(&self, _message: &str) {}
+
+        fn finish_with_message(&self, _message: &str) {}
+    }
+
+    struct NoopPlaybackProgressHandle;
+
+    impl crate::domain::ports::PlaybackProgressHandle for NoopPlaybackProgressHandle {
+        fn tick(&self, _elapsed: std::time::Duration) {}
+
+        fn finish(&self) {}
+    }
+
     fn test_config(tempdir: &TempDir) -> ResolvedConfig {
         ResolvedConfig {
             input_path: tempdir.path().join("input.txt"),
             voice: VoiceName::Alloy,
             model: SpeechModelName::Tts1,
             speed: 1.0,
+            instructions: None,
             output_path: None,
             play_audio: false,
             cache_enabled: true,
@@ -530,7 +643,10 @@ mod tests {
             Arc::new(StaticReader {
                 text: text.to_string(),
             }),
-            Arc::new(CountingTtsProvider { calls }),
+            Arc::new(CountingTtsProvider {
+                calls,
+                requests: None,
+            }),
             audio_player,
             vec![
                 Arc::new(CollapseWhitespaceProcessor),
@@ -540,33 +656,110 @@ mod tests {
         )
     }
 
+    fn service_with_request_recorder(
+        text: &str,
+        calls: Arc<AtomicUsize>,
+        requests: Arc<Mutex<Vec<TtsRequest>>>,
+        reporter: Arc<dyn Reporter>,
+    ) -> TextToSpeechService {
+        TextToSpeechService::new(
+            Arc::new(StaticReader {
+                text: text.to_string(),
+            }),
+            Arc::new(CountingTtsProvider {
+                calls,
+                requests: Some(requests),
+            }),
+            Arc::new(RecordingAudioPlayer::default()),
+            vec![
+                Arc::new(CollapseWhitespaceProcessor),
+                Arc::new(ReduceBlankLinesProcessor),
+            ],
+            reporter,
+        )
+    }
+
     #[test]
     fn cache_key_changes_when_voice_changes() {
-        let first = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1");
-        let second = build_cache_key("hello", "nova", "tts-1", 1.0, "v1");
+        let first = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", None);
+        let second = build_cache_key("hello", "nova", "tts-1", 1.0, "v1", None);
         assert_ne!(first, second);
     }
 
     #[test]
     fn cache_key_changes_for_output_affecting_fields() {
-        let base = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1");
+        let base = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", None);
         assert_ne!(
             base,
-            build_cache_key("goodbye", "alloy", "tts-1", 1.0, "v1")
+            build_cache_key("goodbye", "alloy", "tts-1", 1.0, "v1", None)
         );
         assert_ne!(
             base,
-            build_cache_key("hello", "alloy", "tts-1-hd", 1.0, "v1")
+            build_cache_key("hello", "alloy", "tts-1-hd", 1.0, "v1", None)
         );
-        assert_ne!(base, build_cache_key("hello", "alloy", "tts-1", 1.1, "v1"));
-        assert_ne!(base, build_cache_key("hello", "alloy", "tts-1", 1.0, "v2"));
+        assert_ne!(
+            base,
+            build_cache_key("hello", "alloy", "tts-1", 1.1, "v1", None)
+        );
+        assert_ne!(
+            base,
+            build_cache_key("hello", "alloy", "tts-1", 1.0, "v2", None)
+        );
     }
 
     #[test]
     fn cache_key_uses_null_separators() {
-        let separated = build_cache_key("ab", "c", "tts-1", 1.0, "v1");
-        let ambiguous = build_cache_key("a", "bc", "tts-1", 1.0, "v1");
+        let separated = build_cache_key("ab", "c", "tts-1", 1.0, "v1", None);
+        let ambiguous = build_cache_key("a", "bc", "tts-1", 1.0, "v1", None);
         assert_ne!(separated, ambiguous);
+    }
+
+    #[test]
+    fn cache_key_includes_instructions() {
+        let dutch = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some("Speak Dutch."));
+        let english = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some("Speak English."));
+        assert_ne!(dutch, english);
+    }
+
+    #[test]
+    fn cache_key_distinguishes_none_and_empty_instructions() {
+        let none = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", None);
+        let empty = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some(""));
+        assert_ne!(none, empty);
+    }
+
+    #[test]
+    fn identical_cache_key_inputs_with_instructions_are_stable() {
+        let first = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some("Speak Dutch."));
+        let second = build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some("Speak Dutch."));
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn cache_key_uses_full_instructions() {
+        let long = "Speak in a warm, precise, clearly articulated Dutch style for the full passage with careful pacing and calm emphasis.";
+        let truncated = format_instructions_for_summary(long, false);
+
+        assert_ne!(
+            build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some(long)),
+            build_cache_key("hello", "alloy", "tts-1", 1.0, "v1", Some(&truncated))
+        );
+    }
+
+    #[test]
+    fn instructions_summary_truncates_only_in_normal_mode() {
+        let instructions = "a".repeat(81);
+        assert_eq!(
+            format_instructions_for_summary(&instructions, false)
+                .chars()
+                .count(),
+            80
+        );
+        assert!(format_instructions_for_summary(&instructions, false).ends_with('…'));
+        assert_eq!(
+            format_instructions_for_summary(&instructions, true),
+            instructions
+        );
     }
 
     #[test]
@@ -653,6 +846,188 @@ mod tests {
         assert!(!first.from_cache);
         assert!(second.from_cache);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn requests_include_resolved_instructions() {
+        let tempdir = TempDir::new().unwrap();
+        let mut config = test_config(&tempdir);
+        config.instructions = Some("Speak in Dutch.".to_string());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let service = service_with_request_recorder(
+            "hello world",
+            calls,
+            requests.clone(),
+            Arc::new(SilentReporter),
+        );
+
+        service.run(&config).await.unwrap();
+
+        assert_eq!(
+            requests.lock().unwrap()[0].instructions,
+            Some("Speak in Dutch.".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn requests_include_none_when_instructions_absent() {
+        let tempdir = TempDir::new().unwrap();
+        let config = test_config(&tempdir);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let service = service_with_request_recorder(
+            "hello world",
+            calls,
+            requests.clone(),
+            Arc::new(SilentReporter),
+        );
+
+        service.run(&config).await.unwrap();
+
+        assert_eq!(requests.lock().unwrap()[0].instructions, None);
+    }
+
+    #[tokio::test]
+    async fn cache_key_uses_instructions_during_runs() {
+        let tempdir = TempDir::new().unwrap();
+        let mut config = test_config(&tempdir);
+        config.instructions = Some("Speak in Dutch.".to_string());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let service = service("hello world", calls.clone());
+
+        let first = service.run(&config).await.unwrap();
+        let second = service.run(&config).await.unwrap();
+        config.instructions = Some("Speak in English.".to_string());
+        let third = service.run(&config).await.unwrap();
+
+        assert!(!first.from_cache);
+        assert!(second.from_cache);
+        assert!(!third.from_cache);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn instructions_with_classic_models_warns() {
+        for model in [SpeechModelName::Tts1, SpeechModelName::Tts1Hd] {
+            let tempdir = TempDir::new().unwrap();
+            let mut config = test_config(&tempdir);
+            config.model = model;
+            config.instructions = Some("Speak in Dutch.".to_string());
+            let calls = Arc::new(AtomicUsize::new(0));
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let reporter = Arc::new(RecordingReporter::default());
+            let service =
+                service_with_request_recorder("hello world", calls, requests, reporter.clone());
+
+            service.run(&config).await.unwrap();
+
+            assert_eq!(reporter.warnings.lock().unwrap().len(), 1);
+            assert!(
+                reporter.warnings.lock().unwrap()[0].contains("only supported by gpt-4o-mini-tts")
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn instructions_with_gpt4o_mini_tts_does_not_warn() {
+        let tempdir = TempDir::new().unwrap();
+        let mut config = test_config(&tempdir);
+        config.model = SpeechModelName::Gpt4oMiniTts;
+        config.instructions = Some("Speak in Dutch.".to_string());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let reporter = Arc::new(RecordingReporter::default());
+        let service =
+            service_with_request_recorder("hello world", calls, requests, reporter.clone());
+
+        service.run(&config).await.unwrap();
+
+        assert!(reporter.warnings.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn non_default_speed_with_gpt4o_mini_tts_warns() {
+        let tempdir = TempDir::new().unwrap();
+        let mut config = test_config(&tempdir);
+        config.model = SpeechModelName::Gpt4oMiniTts;
+        config.speed = 1.5;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let reporter = Arc::new(RecordingReporter::default());
+        let service =
+            service_with_request_recorder("hello world", calls, requests, reporter.clone());
+
+        service.run(&config).await.unwrap();
+
+        assert_eq!(reporter.warnings.lock().unwrap().len(), 1);
+        assert!(
+            reporter.warnings.lock().unwrap()[0]
+                .contains("not reliably supported by gpt-4o-mini-tts")
+        );
+    }
+
+    #[tokio::test]
+    async fn non_default_speed_with_tts1_does_not_warn() {
+        let tempdir = TempDir::new().unwrap();
+        let mut config = test_config(&tempdir);
+        config.model = SpeechModelName::Tts1;
+        config.speed = 1.5;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let reporter = Arc::new(RecordingReporter::default());
+        let service =
+            service_with_request_recorder("hello world", calls, requests, reporter.clone());
+
+        service.run(&config).await.unwrap();
+
+        assert!(reporter.warnings.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn instructions_appear_in_summary_when_set() {
+        let tempdir = TempDir::new().unwrap();
+        let mut config = test_config(&tempdir);
+        config.model = SpeechModelName::Gpt4oMiniTts;
+        config.instructions = Some("Speak in Dutch.".to_string());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let reporter = Arc::new(RecordingReporter::default());
+        let service =
+            service_with_request_recorder("hello world", calls, requests, reporter.clone());
+
+        service.run(&config).await.unwrap();
+
+        assert!(
+            reporter
+                .statuses
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|message| message == "Instructions: Speak in Dutch.")
+        );
+    }
+
+    #[tokio::test]
+    async fn instructions_absent_from_summary_when_unset() {
+        let tempdir = TempDir::new().unwrap();
+        let config = test_config(&tempdir);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let reporter = Arc::new(RecordingReporter::default());
+        let service =
+            service_with_request_recorder("hello world", calls, requests, reporter.clone());
+
+        service.run(&config).await.unwrap();
+
+        assert!(
+            reporter
+                .statuses
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|message| !message.starts_with("Instructions:"))
+        );
     }
 
     #[tokio::test]

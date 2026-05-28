@@ -41,6 +41,7 @@ pub trait PlaybackProgressHandle: Send {
 pub trait Reporter: Send + Sync {
     fn status(&self, message: &str);
     fn detail(&self, message: &str);
+    fn warning(&self, message: &str);
     fn success(&self, message: &str);
     fn progress(&self, message: &str, len: u64) -> Box<dyn ProgressHandle>;
     fn playback(&self, total: Option<Duration>) -> Box<dyn PlaybackProgressHandle>;

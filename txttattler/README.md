@@ -6,7 +6,10 @@ TxtTattler is a fast, playful Rust CLI that reads text files out loud with OpenA
 
 - `txttattler <FILE>` command with `clap`-powered help and sensible defaults
 - OpenAI and Azure OpenAI TTS support through `async-openai`
-- Content-based MP3 cache keyed by file content, voice, model, speed, and pipeline version
+- OpenAI `tts-1`, `tts-1-hd`, and `gpt-4o-mini-tts` model support
+- Thirteen built-in voices: `alloy`, `ash`, `ballad`, `coral`, `echo`, `fable`, `onyx`, `nova`, `sage`, `shimmer`, `verse`, `marin`, and `cedar`
+- Optional `--instructions <TEXT>` guidance for language, accent, tone, and style with `gpt-4o-mini-tts`
+- Content-based MP3 cache keyed by file content, voice, model, speed, instructions, and pipeline version
 - `.env`, environment-variable, and TOML config loading with CLI-over-env-over-config precedence
 - Injectable text-processing middleware
 - Cross-platform playback with `rodio`
@@ -39,8 +42,9 @@ If a `.env` file exists in the current working directory, it is loaded before co
 
 ```bash
 TXT_TATTLER_VOICE=nova
-TXT_TATTLER_MODEL=tts-1-hd
+TXT_TATTLER_MODEL=gpt-4o-mini-tts
 TXT_TATTLER_SPEED=1.15
+TXT_TATTLER_INSTRUCTIONS=Speak in Dutch with a warm tone.
 TXT_TATTLER_CACHE_DIR=/tmp/txttattler-cache
 TXT_TATTLER_VERBOSE=true
 TXT_TATTLER_STRIP_MARKDOWN=true
@@ -71,8 +75,9 @@ Azure mode is selected when `--azure`, `TXT_TATTLER_AZURE=true`, or `azure = tru
 
 ```toml
 voice = "nova"
-model = "tts-1"
+model = "gpt-4o-mini-tts"
 speed = 1.0
+instructions = "Speak in Dutch with a warm tone."
 strip_markdown = true
 
 [openai]
@@ -90,6 +95,8 @@ api_version = "2024-02-01"
 ```bash
 txttattler chapter.txt
 txttattler chapter.txt --voice shimmer --model tts-1-hd --speed 1.15
+txttattler chapter.txt --model gpt-4o-mini-tts --instructions "Speak in Dutch."
+txttattler chapter.txt --voice cedar --model gpt-4o-mini-tts --instructions "Use a calm narrator voice."
 txttattler chapter.txt --output chapter.mp3 --no-play
 txttattler chapter.txt --refresh
 txttattler chapter.txt --no-cache --output one-off.mp3 --no-play
@@ -97,7 +104,9 @@ txttattler --list-voices
 txttattler chapter.txt --azure
 ```
 
-By default, repeated runs with the same processed text, voice, model, speed, and processor pipeline reuse the cached MP3 and skip the TTS request. Use `--refresh` to regenerate and atomically replace a cache entry. Use `--no-cache` for one-off generation; combine it with playback or `--output` so the run has somewhere to send the generated audio.
+Use `--instructions` with `gpt-4o-mini-tts` to steer spoken language and delivery independently of the input text, for example `--instructions "Speak in Dutch."`. TxtTattler warns when instructions are used with `tts-1` or `tts-1-hd`, because those models do not support the field. It also warns when non-default `--speed` is used with `gpt-4o-mini-tts`.
+
+By default, repeated runs with the same processed text, voice, model, speed, instructions, and processor pipeline reuse the cached MP3 and skip the TTS request. Use `--refresh` to regenerate and atomically replace a cache entry. Use `--no-cache` for one-off generation; combine it with playback or `--output` so the run has somewhere to send the generated audio.
 
 ## Architecture
 

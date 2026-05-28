@@ -38,6 +38,9 @@ pub struct Cli {
     #[arg(short = 's', long, value_name = "FLOAT", value_parser = parse_speed)]
     pub speed: Option<f32>,
 
+    #[arg(long, value_name = "TEXT")]
+    pub instructions: Option<String>,
+
     #[arg(short = 'o', long, value_name = "PATH")]
     pub output: Option<PathBuf>,
 
@@ -67,8 +70,28 @@ pub struct Cli {
 }
 
 pub fn print_available_voices() {
-    println!("Available voices:");
-    for voice in VoiceName::ALL {
+    println!("Classic voices:");
+    for voice in [
+        VoiceName::Alloy,
+        VoiceName::Echo,
+        VoiceName::Fable,
+        VoiceName::Onyx,
+        VoiceName::Nova,
+        VoiceName::Shimmer,
+    ] {
+        println!(" - {}: {}", voice.as_str(), voice.description());
+    }
+    println!();
+    println!("Extended voices:");
+    for voice in [
+        VoiceName::Ash,
+        VoiceName::Ballad,
+        VoiceName::Coral,
+        VoiceName::Sage,
+        VoiceName::Verse,
+        VoiceName::Marin,
+        VoiceName::Cedar,
+    ] {
         println!(" - {}: {}", voice.as_str(), voice.description());
     }
 }

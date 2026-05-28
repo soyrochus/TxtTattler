@@ -21,6 +21,7 @@ pub struct ResolvedConfig {
     pub voice: VoiceName,
     pub model: SpeechModelName,
     pub speed: f32,
+    pub instructions: Option<String>,
     pub output_path: Option<PathBuf>,
     pub play_audio: bool,
     pub cache_enabled: bool,
@@ -58,6 +59,7 @@ struct FileConfig {
     voice: Option<String>,
     model: Option<String>,
     speed: Option<f32>,
+    instructions: Option<String>,
     cache_dir: Option<PathBuf>,
     azure: Option<bool>,
     verbose: Option<bool>,
@@ -111,6 +113,11 @@ impl ResolvedConfig {
             env::var("TXT_TATTLER_SPEED").ok(),
             file_config.speed,
         )?;
+        let instructions = cli
+            .instructions
+            .clone()
+            .or_else(|| env::var("TXT_TATTLER_INSTRUCTIONS").ok())
+            .or_else(|| file_config.instructions.clone());
         let cache_dir = cli
             .cache_dir
             .clone()
@@ -144,6 +151,7 @@ impl ResolvedConfig {
             voice,
             model,
             speed,
+            instructions,
             output_path: cli.output.clone(),
             play_audio: !cli.no_play,
             cache_enabled: !cli.no_cache,
@@ -337,8 +345,10 @@ mod tests {
         AzureFileConfig, FileConfig, OpenAiFileConfig, ProviderConfig, load_dotenv_from,
         parse_bool, resolve_azure, resolve_openai, resolve_speed, resolve_use_azure,
     };
+    use crate::cli::Cli;
     use std::{
         env, fs,
+        path::PathBuf,
         sync::{Mutex, OnceLock},
     };
     use tempfile::TempDir;
@@ -368,8 +378,34 @@ mod tests {
             "AZURE_OPENAI_DEPLOYMENT",
             "AZURE_OPENAI_API_VERSION",
             "TXT_TATTLER_AZURE",
+            "TXT_TATTLER_INSTRUCTIONS",
+            "TXT_TATTLER_MODEL",
+            "TXT_TATTLER_VOICE",
+            "TXT_TATTLER_SPEED",
+            "TXT_TATTLER_CACHE_DIR",
+            "TXT_TATTLER_VERBOSE",
+            "TXT_TATTLER_STRIP_MARKDOWN",
         ] {
             remove_env(key);
+        }
+    }
+
+    fn base_cli(tempdir: &TempDir, config_path: PathBuf) -> Cli {
+        Cli {
+            file: Some(tempdir.path().join("input.txt")),
+            voice: None,
+            model: None,
+            speed: None,
+            instructions: None,
+            output: None,
+            no_play: true,
+            no_cache: false,
+            refresh: false,
+            cache_dir: None,
+            azure: false,
+            config: Some(config_path),
+            list_voices: false,
+            verbose: false,
         }
     }
 
@@ -551,10 +587,75 @@ mod tests {
     #[test]
     fn file_config_shape_keeps_provider_sections_optional() {
         let _cfg = FileConfig {
+            instructions: Some("Speak in Dutch.".to_string()),
             openai: Some(OpenAiFileConfig::default()),
             azure_openai: Some(AzureFileConfig::default()),
             ..Default::default()
         };
+    }
+
+    #[test]
+    fn env_instructions_set_resolved_config() {
+        let _guard = env_lock();
+        clear_provider_env();
+        set_env("OPENAI_API_KEY", "test-key");
+        set_env("TXT_TATTLER_INSTRUCTIONS", "env-value");
+        let tempdir = TempDir::new().unwrap();
+        let config_path = tempdir.path().join("txttattler.toml");
+        fs::write(&config_path, "").unwrap();
+
+        let resolved = super::ResolvedConfig::from_cli(&base_cli(&tempdir, config_path)).unwrap();
+
+        assert_eq!(resolved.instructions, Some("env-value".to_string()));
+        clear_provider_env();
+    }
+
+    #[test]
+    fn cli_instructions_override_env_value() {
+        let _guard = env_lock();
+        clear_provider_env();
+        set_env("OPENAI_API_KEY", "test-key");
+        set_env("TXT_TATTLER_INSTRUCTIONS", "env-value");
+        let tempdir = TempDir::new().unwrap();
+        let config_path = tempdir.path().join("txttattler.toml");
+        fs::write(&config_path, "").unwrap();
+        let mut cli = base_cli(&tempdir, config_path);
+        cli.instructions = Some("cli-value".to_string());
+
+        let resolved = super::ResolvedConfig::from_cli(&cli).unwrap();
+
+        assert_eq!(resolved.instructions, Some("cli-value".to_string()));
+        clear_provider_env();
+    }
+
+    #[test]
+    fn config_instructions_used_when_cli_and_env_absent() {
+        let _guard = env_lock();
+        clear_provider_env();
+        set_env("OPENAI_API_KEY", "test-key");
+        let tempdir = TempDir::new().unwrap();
+        let config_path = tempdir.path().join("txttattler.toml");
+        fs::write(&config_path, "instructions = \"config-value\"\n").unwrap();
+
+        let resolved = super::ResolvedConfig::from_cli(&base_cli(&tempdir, config_path)).unwrap();
+
+        assert_eq!(resolved.instructions, Some("config-value".to_string()));
+        clear_provider_env();
+    }
+
+    #[test]
+    fn no_instructions_source_resolves_to_none() {
+        let _guard = env_lock();
+        clear_provider_env();
+        set_env("OPENAI_API_KEY", "test-key");
+        let tempdir = TempDir::new().unwrap();
+        let config_path = tempdir.path().join("txttattler.toml");
+        fs::write(&config_path, "").unwrap();
+
+        let resolved = super::ResolvedConfig::from_cli(&base_cli(&tempdir, config_path)).unwrap();
+
+        assert_eq!(resolved.instructions, None);
+        clear_provider_env();
     }
 
     #[test]

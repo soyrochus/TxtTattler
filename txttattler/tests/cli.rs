@@ -1,7 +1,9 @@
 use assert_cmd::Command;
+use clap::Parser;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
+use txttattler::cli::Cli;
 
 #[test]
 fn list_voices_prints_catalog() {
@@ -11,8 +13,53 @@ fn list_voices_prints_catalog() {
         .assert()
         .success()
         .stdout(predicate::str::contains("alloy"))
+        .stdout(predicate::str::contains("ash"))
+        .stdout(predicate::str::contains("ballad"))
+        .stdout(predicate::str::contains("coral"))
+        .stdout(predicate::str::contains("echo"))
+        .stdout(predicate::str::contains("fable"))
+        .stdout(predicate::str::contains("onyx"))
+        .stdout(predicate::str::contains("nova"))
+        .stdout(predicate::str::contains("sage"))
         .stdout(predicate::str::contains("shimmer"))
+        .stdout(predicate::str::contains("verse"))
+        .stdout(predicate::str::contains("marin"))
+        .stdout(predicate::str::contains("cedar"))
+        .stdout(predicate::str::contains("Classic voices:"))
+        .stdout(predicate::str::contains("Extended voices:"))
         .stdout(predicate::str::contains("balanced and versatile"));
+}
+
+#[test]
+fn gpt4o_mini_tts_model_is_accepted_at_parse_time() {
+    let cli =
+        Cli::try_parse_from(["txttattler", "sample.txt", "--model", "gpt-4o-mini-tts"]).unwrap();
+
+    assert_eq!(cli.model, Some("gpt-4o-mini-tts".to_string()));
+}
+
+#[test]
+fn extended_voices_are_accepted_at_parse_time() {
+    for voice in ["ash", "cedar"] {
+        let cli = Cli::try_parse_from(["txttattler", "sample.txt", "--voice", voice]).unwrap();
+
+        assert_eq!(cli.voice, Some(voice.to_string()));
+    }
+}
+
+#[test]
+fn instructions_are_accepted_at_parse_time() {
+    let cli = Cli::try_parse_from([
+        "txttattler",
+        "sample.txt",
+        "--model",
+        "gpt-4o-mini-tts",
+        "--instructions",
+        "Speak in Dutch.",
+    ])
+    .unwrap();
+
+    assert_eq!(cli.instructions, Some("Speak in Dutch.".to_string()));
 }
 
 #[test]

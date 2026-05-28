@@ -89,6 +89,8 @@ impl Reporter for SilentReporter {
 
     fn detail(&self, _message: &str) {}
 
+    fn warning(&self, _message: &str) {}
+
     fn success(&self, _message: &str) {}
 
     fn progress(&self, _message: &str, _len: u64) -> Box<dyn ProgressHandle> {
@@ -162,6 +164,14 @@ impl Reporter for ConsoleReporter {
         if self.verbose {
             println!("{} {}", style("·").dim(), style(message).dim());
         }
+    }
+
+    fn warning(&self, message: &str) {
+        eprintln!(
+            "{} {}",
+            style("Warning:").yellow().bold(),
+            style(message).yellow()
+        );
     }
 
     fn success(&self, message: &str) {

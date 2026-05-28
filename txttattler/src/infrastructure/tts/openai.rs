@@ -52,11 +52,17 @@ impl OpenAiTtsProvider {
 #[async_trait]
 impl TtsProvider for OpenAiTtsProvider {
     async fn synthesize(&self, request: &TtsRequest) -> Result<Vec<u8>> {
-        let openai_request = CreateSpeechRequestArgs::default()
+        let mut request_args = CreateSpeechRequestArgs::default();
+        request_args
             .input(request.text.clone())
             .voice(map_voice(request.voice))
             .model(map_model(request.model))
-            .speed(request.speed)
+            .speed(request.speed);
+        if let Some(instructions) = &request.instructions {
+            request_args.instructions(instructions.clone());
+        }
+
+        let openai_request = request_args
             .build()
             .context("Failed to build the OpenAI speech request.")?;
 
@@ -75,11 +81,18 @@ impl TtsProvider for OpenAiTtsProvider {
 fn map_voice(voice: VoiceName) -> Voice {
     match voice {
         VoiceName::Alloy => Voice::Alloy,
+        VoiceName::Ash => Voice::Ash,
+        VoiceName::Ballad => Voice::Ballad,
+        VoiceName::Coral => Voice::Coral,
         VoiceName::Echo => Voice::Echo,
         VoiceName::Fable => Voice::Fable,
         VoiceName::Onyx => Voice::Onyx,
         VoiceName::Nova => Voice::Nova,
+        VoiceName::Sage => Voice::Sage,
         VoiceName::Shimmer => Voice::Shimmer,
+        VoiceName::Verse => Voice::Verse,
+        VoiceName::Marin => Voice::Marin,
+        VoiceName::Cedar => Voice::Cedar,
     }
 }
 
@@ -87,5 +100,6 @@ fn map_model(model: SpeechModelName) -> SpeechModel {
     match model {
         SpeechModelName::Tts1 => SpeechModel::Tts1,
         SpeechModelName::Tts1Hd => SpeechModel::Tts1Hd,
+        SpeechModelName::Gpt4oMiniTts => SpeechModel::Gpt4oMiniTts,
     }
 }
