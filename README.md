@@ -167,12 +167,14 @@ The spec defines a feature set that all implementations target. Coverage and qua
 
 - CLI powered by `clap` v4 with short and long flags, help output, and an optional banner
 - Hexagonal architecture (ports & adapters) — `FileReader`, `TtsProvider`, `AudioPlayer`, `TextProcessor` as injectable traits
-- OpenAI and Azure OpenAI TTS support
+- OpenAI and Azure OpenAI TTS support, including the `gpt-4o-mini-tts` model
+- Deterministic language and style control via `--instructions` (e.g. *"Speak in Spanish with a happy voice"*)
+- Thirteen built-in voices across two tiers — classic six plus seven extended voices optimised for `gpt-4o-mini-tts`
 - Text chunking to stay within the ~4096-character API limit
 - Cross-platform audio playback via `rodio`
 - `--output` to save the generated MP3
 - TOML config file + environment variable overrides with a defined precedence order
-- MP3 caching keyed on content, voice, model, and speed
+- MP3 caching keyed on content, voice, model, speed, and instructions
 - Progress feedback and `--verbose` mode
 
 ### Building
@@ -198,6 +200,14 @@ txttattler my-notes.txt
 # With personality
 txttattler novel.md --voice fable --speed 0.85
 
+# Speak in Dutch using the expressive new model
+txttattler notes.txt --model gpt-4o-mini-tts --voice coral \
+  --instructions "Speak in Dutch with a warm, conversational tone."
+
+# Speak in Spanish with a happy voice
+txttattler story.txt --model gpt-4o-mini-tts \
+  --instructions "Tell in Spanish with a happy voice."
+
 # Save to file (no speakers)
 txttattler report.txt --output report.mp3 --no-play
 
@@ -211,19 +221,47 @@ txttattler board-minutes.txt --azure
 txttattler <FILE>
 
 Options:
-  -v, --voice <VOICE>     alloy|echo|fable|onyx|nova|shimmer (default: alloy)
-  -m, --model <MODEL>     tts-1 | tts-1-hd (default: tts-1)
-  -s, --speed <FLOAT>     0.25–4.0 (default: 1.0)
-  -o, --output <PATH>     Save MP3 instead of (or with) playing
-      --no-play           Generate but do not play audio
-      --no-cache          Skip cache completely (one-off run)
-      --refresh           Regenerate and replace the cached version
-      --cache-dir <PATH>  Use a custom cache location
-      --azure             Force Azure OpenAI
-      --config <PATH>     Custom TOML config
-      --list-voices       Show all voices with descriptions
-      --verbose           More logging
+  -v, --voice <VOICE>          Voice to use (default: alloy). See --list-voices for all options.
+  -m, --model <MODEL>          tts-1 | tts-1-hd | gpt-4o-mini-tts (default: tts-1)
+  -s, --speed <FLOAT>          0.25–4.0 (default: 1.0). Not supported by gpt-4o-mini-tts.
+      --instructions <TEXT>    Language and style guidance passed to the model.
+                               Only honoured by gpt-4o-mini-tts; silently ignored by tts-1 / tts-1-hd.
+                               Example: "Speak in Spanish with a happy voice."
+  -o, --output <PATH>          Save MP3 instead of (or with) playing
+      --no-play                Generate but do not play audio
+      --no-cache               Skip cache completely (one-off run)
+      --refresh                Regenerate and replace the cached version
+      --cache-dir <PATH>       Use a custom cache location
+      --azure                  Force Azure OpenAI
+      --config <PATH>          Custom TOML config
+      --list-voices            Show all voices with descriptions
+      --verbose                More logging
 ```
+
+#### Voices
+
+`--list-voices` prints all thirteen built-in voices:
+
+```text
+Classic voices (all models):
+  alloy   – balanced and versatile
+  echo    – clear, crisp narration
+  fable   – warm storytelling tone
+  onyx    – deep and steady
+  nova    – bright and expressive
+  shimmer – soft and polished
+
+Extended voices (gpt-4o-mini-tts recommended):
+  ash     – direct and confident
+  ballad  – expressive and emotive
+  coral   – warm and conversational
+  sage    – calm and measured
+  verse   – versatile and natural
+  marin   – clear and bright
+  cedar   – rich and resonant
+```
+
+The extended voices are accepted by all models at the API level; any incompatibility is surfaced at runtime.
 
 ### Configuration
 
@@ -236,7 +274,17 @@ echo 'OPENAI_API_KEY=sk-...' > .env
 txttattler document.txt
 ```
 
-Supported variables: `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `TXTTATTLER_*` overrides.
+Supported variables: `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `TXT_TATTLER_*` overrides.
+
+| Variable | Purpose |
+| --- | --- |
+| `TXT_TATTLER_VOICE` | Default voice |
+| `TXT_TATTLER_MODEL` | Default model |
+| `TXT_TATTLER_SPEED` | Default speed |
+| `TXT_TATTLER_INSTRUCTIONS` | Default instructions for language/style control |
+| `TXT_TATTLER_CACHE_DIR` | Custom cache directory |
+| `TXT_TATTLER_VERBOSE` | Enable verbose output (`true`/`false`) |
+| `TXT_TATTLER_AZURE` | Force Azure OpenAI (`true`/`false`) |
 
 #### MP3 Caching
 
@@ -246,24 +294,28 @@ By default, TxtTattler caches every synthesized result to a platform-appropriate
 - macOS: `~/Library/Caches/txttattler/`
 - Windows: `%LOCALAPPDATA%\txttattler\`
 
-The cache key is content-based (SHA-256 over text, voice, model, speed, and a pipeline version string). Re-running the same file with the same settings is instant and makes zero API calls.
+The cache key is content-based (SHA-256 over text, voice, model, speed, pipeline version, and instructions). Re-running the same file with the same settings is instant and makes zero API calls. Running the same file with a different `--instructions` value always produces a separate cache entry.
 
 #### TOML configuration file
 
 TxtTattler looks for `~/.config/txttattler/config.toml` (or `%APPDATA%\txttattler\config.toml` on Windows):
 
 ```toml
-[tts]
-voice = "fable"
-model = "tts-1"
-speed = 0.95
+voice        = "fable"
+model        = "tts-1"
+speed        = 0.95
+
+# Language and style control (gpt-4o-mini-tts only)
+# model        = "gpt-4o-mini-tts"
+# voice        = "coral"
+# instructions = "Speak in Brazilian Portuguese with a friendly tone."
 
 [openai]
 api_key = "sk-..."
 
-[azure]
-azure_endpoint = "https://yourname.openai.azure.com/"
-api_key = "..."
+[azure_openai]
+endpoint    = "https://yourname.openai.azure.com/"
+api_key     = "..."
 ```
 
 Priority: CLI argument > environment variable > config file > default.
