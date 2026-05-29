@@ -9,12 +9,12 @@ and code snippets for every claim.
 
 ## Inputs
 
-- `<SPEC>`: the original creation prompt / specification document. Here it is the `txttattler-creation-prompt.md` file.
+- `<SPEC>`: the original creation prompt / specification document. Here it is the `../original-txttattler-creation-prompt.md` file.
 - `<IMPL_A>`, `<IMPL_B>`, … : root directories of each implementation. Here they are:
-  - `codex/`   - implementation by Codex
-  - `grok/`    - implementation by Grok
+  - `codex/` - implementation by Codex
+  - `grok/` - implementation by Grok
   - `ghcopilot/` - implementation by GitHub Copilot
-  - `claude/`  - implementation by Claude
+  - `claude/` - implementation by Claude
 ---
 
 ## Outputs
